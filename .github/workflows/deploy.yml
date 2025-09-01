@@ -1,33 +1,51 @@
-name: Deploy React App to S3
+name: Build & Deploy to S3
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1         # <- change
+  S3_BUCKET: ob-resume-data   # <- change
+  CLOUDFRONT_DISTRIBUTION_ID: ""  # optional: set to enable invalidation
+
+permissions:
+  id-token: write   # for OIDC to AWS (no long-lived secrets)
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install dependencies
+      - name: Install deps (lockfile-driven)
         run: npm ci
 
-      - name: Build React app
-        run: npm run build
+      # Your package.json uses a Windows 'set ... && react-scripts build'.
+      # Call react-scripts directly to be cross-platform, and pass the env from the step:
+      - name: Build (CRA + Tailwind)
+        run: npx --no-install react-scripts build
+        env:
+          GENERATE_SOURCEMAP: "false"
 
-      - name: Configure AWS credentials
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>
-          aws-region: <REGION>
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<GHA-OIDC-ROLE>   # <- change
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Sync build folder to S3
-        run: aws s3 sync build/ s3://<YOUR_BUCKET_NAME> --delete
+      - name: Sync build/ to S3
+        run: aws s3 sync build/ "s3://${{ env.S3_BUCKET }}/" --delete
+
+      - name: (Optional) Invalidate CloudFront
+        if: env.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: aws cloudfront create-invalidation \
+             --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
