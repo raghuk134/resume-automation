@@ -1,57 +1,33 @@
-name: Deploy Lambda
+name: Deploy React App to S3
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
-
-permissions:
-  id-token: write   # required for OIDC
-  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python (if you build a Python Lambda)
-        uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
+          node-version: 18
 
-      # If your Lambda needs dependencies, install them into a folder to zip
-      # - run: |
-      #     python -m pip install -r lambda/requirements.txt -t lambda/
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Create deployment package
-        run: |
-          mkdir -p build
-          # Example: zip everything in lambda/ (change to your path)
-          cd lambda
-          zip -r ../build/function.zip .
-          cd ..
+      - name: Build React app
+        run: npm run build
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME_FOR_GITHUB>
+          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>
           aws-region: <REGION>
 
-      - name: Upload to S3 (optional if you update Lambda direct from zip)
-        if: ${{ env.S3_BUCKET != '' }}
-        env:
-          S3_BUCKET: "" # set to your bucket or leave empty to skip
-        run: |
-          if [ -n "$S3_BUCKET" ]; then
-            aws s3 cp build/function.zip s3://$S3_BUCKET/lambda/function.zip
-          fi
-
-      - name: Update Lambda code (direct upload)
-        run: |
-          aws lambda update-function-code \
-            --function-name resume-template \
-            --zip-file fileb://build/function.zip \
-            --publish
+      - name: Sync build folder to S3
+        run: aws s3 sync build/ s3://<YOUR_BUCKET_NAME> --delete
